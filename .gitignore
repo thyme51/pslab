@@ -1,0 +1,22 @@
+# --- Photo/media test data (never commit) ---
+data/
+logs/
+
+# If you later create local working folders
+work/
+out/
+tmp/
+
+# --- Media files ---
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.gif
+*.mp4
+*.mov
+*.m4v
+
+# --- Misc ---
+Thumbs.db
+.DS_Store
