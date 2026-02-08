@@ -57,6 +57,23 @@ function Ensure-Directory {
     }
 }
 
+function Write-CsvWithHeaders {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string[]]$Properties,
+        [Parameter()][object[]]$InputObject
+    )
+    $nullObj = [pscustomobject]@{}
+    foreach ($p in $Properties) {
+        $nullObj | Add-Member -NotePropertyName $p -NotePropertyValue $null
+    }
+    $header = ($nullObj | Select-Object $Properties | ConvertTo-Csv -NoTypeInformation)[0]
+    Set-Content -Path $Path -Value $header
+    if ($InputObject -and @($InputObject).Count -gt 0) {
+        $InputObject | Select-Object $Properties | Export-Csv -NoTypeInformation -Path $Path -Append
+    }
+}
+
 Write-Host "Source:     $SourceCameraPath"
 Write-Host "Archive:    $ArchiveRoot"
 Write-Host "KeepMonths: $KeepMonths"
@@ -65,10 +82,12 @@ Write-Host "Mode:       $(if ($Move) { 'MOVE' } else { 'COPY' })"
 
 $includeExtensions = @('.jpg', '.jpeg', '.png', '.heic', '.gif', '.mp4', '.mov', '.m4v')
 $cutoff = Get-CutoffDate -KeepMonths $KeepMonths
+Write-Verbose "Cutoff date: $cutoff"
 
 $files =
     Get-ChildItem -LiteralPath $SourceCameraPath -Recurse -File |
     Where-Object { $includeExtensions -contains $_.Extension.ToLowerInvariant() }
+Write-Verbose "Files matched: $(@($files).Count)"
 
 $plan = foreach ($f in $files) {
     $dt = $f.LastWriteTime
@@ -93,8 +112,21 @@ Ensure-Directory -Path $logDir
 $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
 $planCsv = Join-Path $logDir "plan-$ts.csv"
 $summaryCsv = Join-Path $logDir "summary-$ts.csv"
+Write-Verbose "Plan CSV: $planCsv"
+Write-Verbose "Summary CSV: $summaryCsv"
 
-$plan | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $planCsv
+$planProperties = @(
+    'SourcePath',
+    'Name',
+    'Extension',
+    'LastWriteTime',
+    'YearMonth',
+    'IsOlderThanCutoff',
+    'PlannedAction'
+)
+$summaryProperties = @('YearMonth', 'Total', 'Archive', 'Keep')
+
+Write-CsvWithHeaders -Path $planCsv -Properties $planProperties -InputObject $plan
 $summary =
     $plan |
     Group-Object YearMonth |
@@ -108,7 +140,7 @@ $summary =
             Keep      = @($g | Where-Object PlannedAction -eq 'Keep').Count
         }
     }
-$summary | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $summaryCsv
+Write-CsvWithHeaders -Path $summaryCsv -Properties $summaryProperties -InputObject $summary
 
 $total = @($plan).Count
 $archive = @($plan | Where-Object PlannedAction -eq 'Archive').Count
@@ -116,9 +148,6 @@ $keep = @($plan | Where-Object PlannedAction -eq 'Keep').Count
 
 Write-Host "`nWrote plan:    $planCsv"
 Write-Host "Wrote summary: $summaryCsv"
-Write-Host "`nTotals:"
-Write-Host "Files total: $total"
-Write-Host "Archive:     $archive"
-Write-Host "Keep:        $keep"
+Write-Host "`nTotals: total=$total, archive=$archive, keep=$keep"
 
 exit 0
