@@ -35,3 +35,29 @@ Apply changes (move):
 Notes:
 - Default mode is dry-run; nothing is copied or moved unless `-Apply` is set.
 - The script writes plan/summary CSVs into `logs/`.
+
+## Test run catalog
+
+Use the test-run helper to list or execute predefined command collections for `Organize-SamsungCamera.ps1`.
+
+Script:
+- `scripts/test-runs/Organize-SamsungCamera/Invoke-OrganizeSamsungCameraTestRuns.ps1`
+
+Collections:
+- `smoke`: empty + normal dry-run
+- `verbose`: empty + normal with `-Verbose`
+- `all`: smoke + verbose
+
+Examples (list only):
+
+```powershell
+.\scripts\test-runs\Organize-SamsungCamera\Invoke-OrganizeSamsungCameraTestRuns.ps1
+.\scripts\test-runs\Organize-SamsungCamera\Invoke-OrganizeSamsungCameraTestRuns.ps1 -Collection verbose
+```
+
+Examples (run collection):
+
+```powershell
+.\scripts\test-runs\Organize-SamsungCamera\Invoke-OrganizeSamsungCameraTestRuns.ps1 -Collection smoke -Run
+.\scripts\test-runs\Organize-SamsungCamera\Invoke-OrganizeSamsungCameraTestRuns.ps1 -Collection verbose -Run
+```

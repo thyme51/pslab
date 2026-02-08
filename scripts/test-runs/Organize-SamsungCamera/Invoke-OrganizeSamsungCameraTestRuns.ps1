@@ -1,72 +1,98 @@
 [CmdletBinding()]
 param(
-    [Parameter()]
-    [ValidateNotNullOrEmpty()]
-    [string]$Collection = 'all',
+  [ValidateSet('smoke','verbose','all')]
+  [string]$Collection = 'smoke',
 
-    # List commands only; do not execute.
-    [switch]$ListOnly = $true,
+  [int]$KeepMonths = 6,
 
-    # Execute commands (overrides -ListOnly).
-    [switch]$Run
+  [switch]$ListOnly
 )
 
-$scriptPath = Join-Path $PSScriptRoot '..\..\Organize-SamsungCamera.ps1'
-$scriptPath = Resolve-Path -LiteralPath $scriptPath
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-$runs = @(
-    [pscustomobject]@{
-        Name = 'empty-dry-run'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in-empty`" -ArchiveRoot `".\data\out`" -KeepMonths 6"
-    },
-    [pscustomobject]@{
-        Name = 'empty-verbose'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in-empty`" -ArchiveRoot `".\data\out`" -KeepMonths 6 -Verbose"
-    },
-    [pscustomobject]@{
-        Name = 'sample-dry-run'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in`" -ArchiveRoot `".\data\out`" -KeepMonths 6"
-    },
-    [pscustomobject]@{
-        Name = 'sample-verbose'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in`" -ArchiveRoot `".\data\out`" -KeepMonths 6 -Verbose"
-    },
-    [pscustomobject]@{
-        Name = 'sample-keep-1mo'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in`" -ArchiveRoot `".\data\out`" -KeepMonths 1"
-    },
-    [pscustomobject]@{
-        Name = 'sample-apply-copy'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in`" -ArchiveRoot `".\data\out`" -KeepMonths 6 -Apply"
-    },
-    [pscustomobject]@{
-        Name = 'sample-apply-move'
-        Command = "& `"$scriptPath`" -SourceCameraPath `".\data\in`" -ArchiveRoot `".\data\out`" -KeepMonths 6 -Move -Apply"
-    }
+# Resolve repo root from this file location:
+# ...\scripts\test-runs\Organize-SamsungCamera\Invoke-*.ps1 -> repo root is 3 levels up
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+
+$scriptPath = Join-Path $repoRoot 'scripts\Organize-SamsungCamera.ps1'
+$inEmpty    = Join-Path $repoRoot 'data\in-empty'
+$inNormal   = Join-Path $repoRoot 'data\in'
+$outRoot    = Join-Path $repoRoot 'data\out'
+
+New-Item -ItemType Directory -Path $inEmpty -Force | Out-Null
+
+$testsSmoke = @(
+  [pscustomobject]@{ Name='Empty default';  Params=@{ SourceCameraPath=$inEmpty; ArchiveRoot=$outRoot; KeepMonths=$KeepMonths } },
+  [pscustomobject]@{ Name='Normal default'; Params=@{ SourceCameraPath=$inNormal; ArchiveRoot=$outRoot; KeepMonths=$KeepMonths } }
 )
 
-$collections = @{
-    all = $runs.Name
-    empty = @('empty-dry-run', 'empty-verbose')
-    sample = @('sample-dry-run', 'sample-verbose', 'sample-keep-1mo')
-    apply = @('sample-apply-copy', 'sample-apply-move')
-}
+$testsVerbose = @(
+  [pscustomobject]@{ Name='Empty verbose';  Params=@{ SourceCameraPath=$inEmpty; ArchiveRoot=$outRoot; KeepMonths=$KeepMonths; Verbose=$true } },
+  [pscustomobject]@{ Name='Normal verbose'; Params=@{ SourceCameraPath=$inNormal; ArchiveRoot=$outRoot; KeepMonths=$KeepMonths; Verbose=$true } }
+)
 
-if (-not $collections.ContainsKey($Collection)) {
-    Write-Error "Unknown collection '$Collection'. Available: $($collections.Keys -join ', ')"
-    exit 1
-}
+$selected =
+  switch ($Collection) {
+    'smoke'   { $testsSmoke }
+    'verbose' { $testsVerbose }
+    'all'     { $testsSmoke + $testsVerbose }
+  }
 
-$selectedNames = $collections[$Collection]
-$selected = $runs | Where-Object { $selectedNames -contains $_.Name }
-
+Write-Host "RepoRoot:   $repoRoot"
+Write-Host "Script:     $scriptPath"
 Write-Host "Collection: $Collection"
-Write-Host "Runs: $($selected.Name -join ', ')"
+Write-Host "KeepMonths: $KeepMonths"
+Write-Host ""
 
-foreach ($entry in $selected) {
-    Write-Host "`n[$($entry.Name)]"
-    Write-Host $entry.Command
-    if ($Run) {
-        Invoke-Expression $entry.Command
+# Print commands (handy copy/paste)
+Write-Host "Commands:"
+foreach ($t in $selected) {
+  $parts = @()
+  foreach ($kv in ($t.Params.GetEnumerator() | Sort-Object Name)) {
+    $key = $kv.Key
+    if ($key -eq 'Verbose' -and $kv.Value) {
+      $parts += '-Verbose'
+      continue
     }
+    $value = $kv.Value
+    if ($value -match '\s') {
+      $parts += ('-{0} "{1}"' -f $key, $value)
+    } else {
+      $parts += ('-{0} {1}' -f $key, $value)
+    }
+  }
+  $cmd = '& "{0}" {1}' -f $scriptPath, ($parts -join ' ')
+  Write-Host " - $($t.Name): $cmd"
 }
+Write-Host ""
+
+if ($ListOnly) { return }
+
+$results = foreach ($t in $selected) {
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  try {
+    $params = $t.Params
+    & $scriptPath @params | Out-Default
+    $ok = $true
+    $err = $null
+  } catch {
+    $ok = $false
+    $err = $_.Exception.Message
+  } finally {
+    $sw.Stop()
+  }
+
+  [pscustomobject]@{
+    Test    = $t.Name
+    Success = $ok
+    Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+    Error   = $err
+  }
+}
+
+Write-Host ""
+$results | Format-Table -AutoSize
+
+if ($results.Success -contains $false) { exit 1 }
+exit 0
